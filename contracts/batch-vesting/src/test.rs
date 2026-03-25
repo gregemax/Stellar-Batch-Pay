@@ -236,3 +236,67 @@ fn test_events_emission() {
     }
     assert!(claim2_found, "Should find claim event for recipient2");
 }
+
+#[test]
+fn test_multiple_vestings_different_unlocks() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, BatchVestingContract);
+    let client = BatchVestingContractClient::new(&env, &contract_id);
+
+    let sender = Address::generate(&env);
+    let recipient = Address::generate(&env);
+
+    let token_admin = Address::generate(&env);
+    let (token, token_admin_client) = create_token_contract(&env, &token_admin);
+
+    token_admin_client.mint(&sender, &1000);
+
+    let recipients = Vec::from_array(&env, [recipient.clone()]);
+
+    env.ledger().with_mut(|li| {
+        li.timestamp = 0;
+    });
+
+    let amounts_first = Vec::from_array(&env, [100]);
+    let unlock_time_first = 1000;
+    client.deposit(
+        &sender,
+        &token.address,
+        &recipients,
+        &amounts_first,
+        &unlock_time_first,
+    );
+
+    let amounts_second = Vec::from_array(&env, [300]);
+    let unlock_time_second = 2000;
+    client.deposit(
+        &sender,
+        &token.address,
+        &recipients,
+        &amounts_second,
+        &unlock_time_second,
+    );
+
+    assert_eq!(token.balance(&sender), 600);
+    assert_eq!(token.balance(&contract_id), 400);
+
+    // First vesting should be claimable without affecting the later one.
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1001;
+    });
+
+    client.claim(&recipient, &token.address);
+    assert_eq!(token.balance(&recipient), 100);
+    assert_eq!(token.balance(&contract_id), 300);
+
+    // Second vesting unlocks later.
+    env.ledger().with_mut(|li| {
+        li.timestamp = 2001;
+    });
+
+    client.claim(&recipient, &token.address);
+    assert_eq!(token.balance(&recipient), 400);
+    assert_eq!(token.balance(&contract_id), 0);
+}
