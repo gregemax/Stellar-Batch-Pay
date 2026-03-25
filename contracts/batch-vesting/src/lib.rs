@@ -47,21 +47,18 @@ impl BatchVestingContract {
             total_amount = total_amount.checked_add(amount).unwrap();
 
             let key = DataKey::Vesting(recipient.clone());
-            let current_vesting: Option<VestingData> = env.storage().persistent().get(&key);
+            let mut vestings: Vec<VestingData> = env
+                .storage()
+                .persistent()
+                .get(&key)
+                .unwrap_or_else(|| Vec::new(&env));
 
-            let new_vesting = match current_vesting {
-                Some(mut v) => {
-                    v.amount += amount;
-                    v.unlock_time = core::cmp::max(v.unlock_time, unlock_time);
-                    v
-                }
-                None => VestingData {
-                    amount,
-                    unlock_time,
-                },
-            };
+            vestings.push_back(VestingData {
+                amount,
+                unlock_time,
+            });
 
-            env.storage().persistent().set(&key, &new_vesting);
+            env.storage().persistent().set(&key, &vestings);
 
             env.events().publish(
                 (Symbol::new(&env, "VestingDeposited"),),
@@ -78,7 +75,7 @@ impl BatchVestingContract {
         recipient.require_auth();
 
         let key = DataKey::Vesting(recipient.clone());
-        let vesting: VestingData = env
+        let vestings: Vec<VestingData> = env
             .storage()
             .persistent()
             .get(&key)
@@ -86,13 +83,27 @@ impl BatchVestingContract {
 
         let current_time = env.ledger().timestamp();
 
-        if current_time < vesting.unlock_time {
+        let mut amount_to_transfer: i128 = 0;
+        let mut remaining = Vec::new(&env);
+
+        for i in 0..vestings.len() {
+            let vesting = vestings.get(i).unwrap();
+            if current_time >= vesting.unlock_time {
+                amount_to_transfer = amount_to_transfer.checked_add(vesting.amount).unwrap();
+            } else {
+                remaining.push_back(vesting);
+            }
+        }
+
+        if amount_to_transfer == 0 {
             panic!("Vesting is currently locked");
         }
 
-        let amount_to_transfer = vesting.amount;
-
-        env.storage().persistent().remove(&key);
+        if remaining.len() == 0 {
+            env.storage().persistent().remove(&key);
+        } else {
+            env.storage().persistent().set(&key, &remaining);
+        }
 
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(
