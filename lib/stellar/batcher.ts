@@ -10,6 +10,7 @@ import {
   Operation,
   TransactionBuilder,
   Horizon,
+  SorobanRpc,
 } from 'stellar-sdk';
 import Big from 'big.js';
 
@@ -25,6 +26,10 @@ export interface CreateBatchesOptions {
   maxTransactionBytes?: number;
   network?: 'testnet' | 'mainnet';
   server?: Horizon.Server;
+  /** Provide a Soroban RPC server to enable simulation-based size estimation (#218) */
+  sorobanServer?: SorobanRpc.Server;
+  /** Public key of the source account (required for Soroban simulation) */
+  sourcePublicKey?: string;
 }
 
 export const STELLAR_TRANSACTION_SIZE_LIMIT_BYTES = 100_000;
@@ -33,6 +38,60 @@ const SIZE_ESTIMATION_ACCOUNT = new Account(
   'GANQYDFSSJMTNLITJNXUPRUIFDVZQK2P4HWSX5CAI4SPIYPXNNFOPZQE',
   '1',
 );
+
+/**
+ * Use Soroban RPC simulateTransaction to get accurate footprint-aware size (#218).
+ * Falls back to static estimation if simulation fails.
+ */
+export async function simulateBatchTransactionSize(
+  payments: PaymentInstruction[],
+  network: 'testnet' | 'mainnet',
+  sorobanServer: SorobanRpc.Server,
+  sourcePublicKey: string,
+  fee?: number,
+): Promise<number> {
+  const networkPassphrase = network === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET;
+  const feeToUse = fee ?? 100;
+
+  try {
+    const accountData = await sorobanServer.getAccount(sourcePublicKey);
+    const account = new Account(accountData.accountId(), accountData.sequenceNumber());
+
+    let builder = new TransactionBuilder(account, {
+      fee: String(feeToUse),
+      networkPassphrase,
+    }).addMemo(Memo.text('batch-size-check'));
+
+    for (const payment of payments) {
+      const asset = parseAsset(payment.asset);
+      const stellarAsset =
+        asset.issuer === null
+          ? StellarAsset.native()
+          : new StellarAsset(asset.code, asset.issuer);
+
+      builder = builder.addOperation(
+        Operation.payment({
+          destination: payment.address,
+          asset: stellarAsset,
+          amount: payment.amount,
+        }),
+      );
+    }
+
+    const tx = builder.setTimeout(300).build();
+    const simResult = await sorobanServer.simulateTransaction(tx);
+
+    // If simulation succeeds, use the actual XDR size from the prepared transaction
+    if (!SorobanRpc.Api.isSimulationError(simResult)) {
+      const preparedTx = SorobanRpc.assembleTransaction(tx, simResult).build();
+      return getTransactionByteLength(preparedTx.toEnvelope().toXDR());
+    }
+  } catch {
+    // fall through to static estimation
+  }
+
+  return estimateBatchTransactionSize(payments, network, fee);
+}
 
 function getTransactionByteLength(xdr: string | Buffer): number {
   if (typeof xdr !== 'string') {
@@ -92,6 +151,7 @@ export async function createBatches(
   const maxTransactionBytes =
     options.maxTransactionBytes ?? DEFAULT_TRANSACTION_SIZE_HEADROOM_BYTES;
   const network = options.network ?? 'testnet';
+  const useSorobanSim = !!(options.sorobanServer && options.sourcePublicKey);
 
   // Fetch dynamic fee for size estimation
   let dynamicFee: number | undefined;
@@ -103,12 +163,29 @@ export async function createBatches(
     }
   }
 
+  /**
+   * Get byte size for a candidate batch — uses Soroban RPC simulation when available (#218),
+   * otherwise falls back to static estimation.
+   */
+  async function getBatchSize(payments: PaymentInstruction[]): Promise<number> {
+    if (useSorobanSim) {
+      return simulateBatchTransactionSize(
+        payments,
+        network,
+        options.sorobanServer!,
+        options.sourcePublicKey!,
+        dynamicFee,
+      );
+    }
+    return estimateBatchTransactionSize(payments, network, dynamicFee);
+  }
+
   for (const instruction of instructions) {
     const candidateBatch = [...currentBatch, instruction];
     const exceedsOperationLimit =
       candidateBatch.length > maxOperationsPerTransaction;
     const exceedsSizeLimit =
-      estimateBatchTransactionSize(candidateBatch, network, dynamicFee) > maxTransactionBytes;
+      (await getBatchSize(candidateBatch)) > maxTransactionBytes;
 
     if ((exceedsOperationLimit || exceedsSizeLimit) && currentBatch.length > 0) {
       batches.push({
@@ -119,7 +196,7 @@ export async function createBatches(
       transactionIndex++;
     }
 
-    const singleInstructionSize = estimateBatchTransactionSize([instruction], network, dynamicFee);
+    const singleInstructionSize = await getBatchSize([instruction]);
     if (singleInstructionSize > maxTransactionBytes) {
       throw new Error(
         `Payment to ${instruction.address} exceeds the Stellar transaction size limit`,
