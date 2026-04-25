@@ -448,18 +448,6 @@ impl BatchVestingContract {
         );
     }
 
-    /// Directly transfer admin to a new address. Requires authorization from the current admin.
-    pub fn transfer_admin(env: Env, admin: Address, new_admin: Address) {
-        Self::panic_if_paused(&env);
-        Self::require_current_admin(&env, &admin);
-        Self::set_admin_internal(&env, &new_admin);
-        Self::remove_pending_admin_internal(&env);
-        Self::extend_ttl_admin(&env);
-
-        env.events()
-            .publish((Symbol::new(&env, "AdminTransferred"),), (admin, new_admin));
-    }
-
     /// Renounce admin rights and clear any in-flight transfer.
     pub fn renounce_admin(env: Env, admin: Address) {
         Self::panic_if_paused(&env);

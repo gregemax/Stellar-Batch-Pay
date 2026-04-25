@@ -1872,3 +1872,51 @@ fn test_config_enforcement() {
     // Should panic because batch size is 3 but limit is 2
     client.deposit(&sender, &token, &recipients, &amounts, &0, &2000);
 }
+
+#[test]
+fn test_propose_and_accept_admin() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, BatchVestingContract);
+    let client = BatchVestingContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+
+    client.set_admin(&admin);
+
+    // Step 1: Propose
+    client.propose_admin(&admin, &new_admin);
+
+    // Step 2: Accept
+    client.accept_admin(&new_admin);
+
+    // Verify transfer
+    let events = env.events().all();
+    let transfer_event = events.get(events.len() - 1).unwrap();
+    assert_eq!(
+        transfer_event.1.get(0).unwrap(),
+        Symbol::new(&env, "AdminTransferred").into_val(&env)
+    );
+}
+
+#[test]
+#[should_panic(expected = "HostError: Error(Contract, #9)")]
+fn test_only_pending_admin_can_accept() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, BatchVestingContract);
+    let client = BatchVestingContractClient::new(&env, &contract_id);
+
+    let admin = Address::generate(&env);
+    let new_admin = Address::generate(&env);
+    let attacker = Address::generate(&env);
+
+    client.set_admin(&admin);
+    client.propose_admin(&admin, &new_admin);
+
+    // Attacker tries to accept — must fail with Unauthorized (#9)
+    client.accept_admin(&attacker);
+}
