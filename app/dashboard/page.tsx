@@ -7,13 +7,33 @@ import { QuickActions } from "@/components/dashboard/QuickActions";
 import { DeveloperResources } from "@/components/dashboard/developer-resources";
 import { useFreighter } from "@/hooks/use-freighter";
 import { useDashboardMetrics } from "@/hooks/use-dashboard-metrics";
+import { VestingTTLAlert } from "@/components/dashboard/VestingTTLAlert";
+import { useState } from "react";
 
 export default function DashboardPage() {
   const { publicKey } = useFreighter();
   const { metrics, loading } = useDashboardMetrics(publicKey, "testnet"); // Assuming testnet for now
+  const [isBumping, setIsBumping] = useState(false);
+
+  // Mock TTL data for demonstration
+  const mockTTL = { remainingDays: 4, totalDays: 30 };
+
+  const handleBump = async () => {
+    setIsBumping(true);
+    // Simulate bump logic
+    setTimeout(() => setIsBumping(false), 2000);
+  };
 
   return (
     <div className="space-y-8">
+      {/* TTL Warning Banner */}
+      <VestingTTLAlert 
+        remainingDays={mockTTL.remainingDays} 
+        totalDays={mockTTL.totalDays} 
+        onBump={handleBump}
+        isBumping={isBumping}
+      />
+
       {/* Header Section */}
       <div className="flex flex-col gap-2">
         <h1 className="text-3xl font-bold tracking-tight text-white">

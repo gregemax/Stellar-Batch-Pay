@@ -94,3 +94,19 @@ export interface BuildBatchResult {
   network: "testnet" | "mainnet";
   publicKey: string;
 }
+
+/** Vesting data structure matching the smart contract */
+export interface VestingData {
+  totalAmount: string;
+  releasedAmount: string;
+  startTime: number;
+  endTime: number;
+  sender: string;
+  token: string;
+  recipient: string;
+  index: number;
+  ttlStatus?: "healthy" | "warning" | "expired";
+  remainingDays?: number;
+}
+
+export type TTLStatus = "healthy" | "warning" | "expired";

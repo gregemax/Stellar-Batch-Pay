@@ -157,10 +157,10 @@ impl BatchVestingContract {
                 let legacy_vesting = old_vestings.get(i).unwrap();
                 // Map legacy VestingData to new structure
                 let vesting = VestingData {
-                    total_amount: legacy_vesting.amount,
-                    released_amount: 0,
-                    start_time: env.ledger().timestamp(), // Best effort for legacy
-                    end_time: legacy_vesting.unlock_time,
+                    total_amount: legacy_vesting.total_amount,
+                    released_amount: legacy_vesting.released_amount,
+                    start_time: legacy_vesting.start_time,
+                    end_time: legacy_vesting.end_time,
                     sender: legacy_vesting.sender.clone(),
                     token: legacy_vesting.token.clone(),
                 };
@@ -272,22 +272,34 @@ impl BatchVestingContract {
     }
 
     fn extend_ttl_paused(env: &Env) {
+        if env.storage().persistent().has(&DataKey::Paused) {
+            env.storage()
+                .persistent()
+                .extend_ttl(&DataKey::Paused, BUMP_THRESHOLD, BUMP_EXTEND_TO);
+        }
+    }
+
+    fn extend_ttl_instance(env: &Env) {
         env.storage()
-            .persistent()
-            .extend_ttl(&DataKey::Paused, BUMP_THRESHOLD, BUMP_EXTEND_TO);
+            .instance()
+            .extend_ttl(BUMP_THRESHOLD, BUMP_EXTEND_TO);
     }
 
     fn extend_ttl_vesting(env: &Env, recipient: &Address, idx: u32) {
-        env.storage().persistent().extend_ttl(
-            &DataKey::VestingEntry(recipient.clone(), idx),
-            BUMP_THRESHOLD,
-            BUMP_EXTEND_TO,
-        );
-        env.storage().persistent().extend_ttl(
-            &DataKey::VestingCount(recipient.clone()),
-            BUMP_THRESHOLD,
-            BUMP_EXTEND_TO,
-        );
+        if env.storage().persistent().has(&DataKey::VestingEntry(recipient.clone(), idx)) {
+            env.storage().persistent().extend_ttl(
+                &DataKey::VestingEntry(recipient.clone(), idx),
+                BUMP_THRESHOLD,
+                BUMP_EXTEND_TO,
+            );
+        }
+        if env.storage().persistent().has(&DataKey::VestingCount(recipient.clone())) {
+            env.storage().persistent().extend_ttl(
+                &DataKey::VestingCount(recipient.clone()),
+                BUMP_THRESHOLD,
+                BUMP_EXTEND_TO,
+            );
+        }
     }
 }
 
@@ -697,5 +709,29 @@ impl BatchVestingContract {
 
         result_vec
     }
+
+    /// Bumps the TTL for the contract instance and administrative keys.
+    /// Can be called by anyone to help maintain the contract's availability.
+    pub fn bump_instance_ttl(env: Env) {
+        Self::extend_ttl_instance(&env);
+        Self::extend_ttl_admin(&env);
+        Self::extend_ttl_paused(&env);
+    }
+
+    /// Bumps the TTL for a specific vesting schedule and the recipient's schedule count.
+    /// Can be called by anyone (e.g., a keeper bot or the recipient).
+    pub fn bump_vesting_ttl(env: Env, recipient: Address, index: u32) {
+        Self::extend_ttl_vesting(&env, &recipient, index);
+    }
+
+    /// Maintenance function to bump everything relevant to a recipient.
+    pub fn maintenance(env: Env, recipient: Address) {
+        Self::bump_instance_ttl(env.clone());
+        let count = Self::get_vesting_count(&env, &recipient);
+        for i in 0..count {
+            Self::extend_ttl_vesting(&env, &recipient, i);
+        }
+    }
 }
 mod test;
+mod ttl_test;

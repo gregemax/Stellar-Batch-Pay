@@ -99,3 +99,83 @@ export async function buildDepositTransaction(
   // Return unsigned XDR for wallet signing
   return preparedTx.toEnvelope().toXDR('base64');
 }
+
+/**
+ * Build an unsigned transaction to bump the contract instance TTL.
+ */
+export async function buildBumpInstanceTtlTransaction(
+  contractId: string,
+  network: 'testnet' | 'mainnet',
+  publicKey: string
+): Promise<string> {
+  const networkPassphrase = network === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET;
+  const rpcUrl = SOROBAN_RPC_URLS[network];
+
+  const { SorobanRpc } = await import('stellar-sdk');
+  const server = new SorobanRpc.Server(rpcUrl, { allowHttp: false });
+
+  const sourceAccount = await server.getAccount(publicKey);
+  const account = new Account(sourceAccount.accountId(), sourceAccount.sequenceNumber());
+
+  const contract = new Contract(contractId);
+  const operation = contract.call('bump_instance_ttl');
+
+  const tx = new TransactionBuilder(account, {
+    fee: '1000000',
+    networkPassphrase,
+  })
+    .addOperation(operation)
+    .setTimeout(300)
+    .build();
+
+  const simResult = await server.simulateTransaction(tx);
+  if (SorobanRpc.Api.isSimulationError(simResult)) {
+    throw new Error(`Simulation failed: ${simResult.error}`);
+  }
+
+  const preparedTx = SorobanRpc.assembleTransaction(tx, simResult).build();
+  return preparedTx.toEnvelope().toXDR('base64');
+}
+
+/**
+ * Build an unsigned transaction to bump a specific vesting schedule TTL.
+ */
+export async function buildBumpVestingTtlTransaction(
+  contractId: string,
+  recipient: string,
+  index: number,
+  network: 'testnet' | 'mainnet',
+  publicKey: string
+): Promise<string> {
+  const networkPassphrase = network === 'mainnet' ? Networks.PUBLIC : Networks.TESTNET;
+  const rpcUrl = SOROBAN_RPC_URLS[network];
+
+  const { SorobanRpc } = await import('stellar-sdk');
+  const server = new SorobanRpc.Server(rpcUrl, { allowHttp: false });
+
+  const sourceAccount = await server.getAccount(publicKey);
+  const account = new Account(sourceAccount.accountId(), sourceAccount.sequenceNumber());
+
+  const contract = new Contract(contractId);
+  const operation = contract.call(
+    'bump_vesting_ttl',
+    new Address(recipient).toScVal(),
+    nativeToScVal(index, { type: 'u32' })
+  );
+
+  const tx = new TransactionBuilder(account, {
+    fee: '1000000',
+    networkPassphrase,
+  })
+    .addOperation(operation)
+    .setTimeout(300)
+    .build();
+
+  const simResult = await server.simulateTransaction(tx);
+  if (SorobanRpc.Api.isSimulationError(simResult)) {
+    throw new Error(`Simulation failed: ${simResult.error}`);
+  }
+
+  const preparedTx = SorobanRpc.assembleTransaction(tx, simResult).build();
+  return preparedTx.toEnvelope().toXDR('base64');
+}
