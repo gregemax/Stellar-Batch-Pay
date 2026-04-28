@@ -206,6 +206,18 @@ The `batch-vesting` contract allows a sender to deposit tokens for multiple reci
 - **Limits**: Enforces `MAX_BATCH_SIZE = 100` to ensure transactions fit within ledger limits.
 - **Security**: Only the recipient can claim their funds, and only after the `unlock_time`.
 
+### Contract Upgrades
+
+The contract uses Soroban's standard upgradeability pattern. Upgrades are gated by admin authorization and a configurable timelock to ensure security and transparency.
+
+1. **Propose Upgrade**: The admin calls `propose_upgrade(new_wasm_hash)`. This records the hash and calculates an execution timestamp based on the current `upgrade_timelock` configuration.
+2. **Wait**: The community/users have a window to review the new code before the timelock expires.
+3. **Execute Upgrade**: After the timelock expires, the admin calls `execute_upgrade()`. This replaces the contract code with the new WASM while preserving all current storage.
+
+**Events for Auditability**:
+- `UpgradeProposed(new_wasm_hash, execute_at)`
+- `UpgradeExecuted(new_wasm_hash)`
+
 ## Testing Strategy
 
 ### Unit Tests

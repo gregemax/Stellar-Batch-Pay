@@ -2065,6 +2065,7 @@ fn test_set_config() {
     let new_config = Config {
         max_batch_size: 50,
         max_schedules_per_recipient: 5,
+        upgrade_timelock: 100,
     };
 
     client.set_config(&admin, &new_config);
@@ -2075,8 +2076,8 @@ fn test_set_config() {
     let event_topics = last_event.1;
     let topic: Symbol = event_topics.get(0).unwrap().try_into_val(&env).unwrap();
     assert_eq!(topic, Symbol::new(&env, "ConfigUpdated"));
-    let event_data: (u32, u32) = last_event.2.try_into_val(&env).unwrap();
-    assert_eq!(event_data, (50u32, 5u32));
+    let event_data: (u32, u32, u64) = last_event.2.try_into_val(&env).unwrap();
+    assert_eq!(event_data, (50u32, 5u32, 100u64));
 }
 
 #[test]
@@ -2094,6 +2095,7 @@ fn test_config_enforcement() {
     client.set_config(&admin, &Config {
         max_batch_size: 2,
         max_schedules_per_recipient: 10,
+        upgrade_timelock: 100,
     });
 
     let sender = Address::generate(&env);
