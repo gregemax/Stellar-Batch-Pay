@@ -64,6 +64,7 @@ pub struct RevokeRequest {
 pub struct Config {
     pub max_batch_size: u32,
     pub max_schedules_per_recipient: u32,
+    pub upgrade_timelock: u64,
 }
 
 #[contracttype]
@@ -185,6 +186,7 @@ impl BatchVestingContract {
             .unwrap_or(Config {
                 max_batch_size: MAX_BATCH_SIZE,
                 max_schedules_per_recipient: MAX_SCHEDULES_PER_RECIPIENT,
+                upgrade_timelock: UPGRADE_TIMELOCK,
             })
     }
 
@@ -739,7 +741,7 @@ impl BatchVestingContract {
 
         env.events().publish(
             (Symbol::new(&env, "ConfigUpdated"),),
-            (config.max_batch_size, config.max_schedules_per_recipient),
+            (config.max_batch_size, config.max_schedules_per_recipient, config.upgrade_timelock),
         );
     }
 
@@ -1008,7 +1010,8 @@ impl BatchVestingContract {
     /// Propose a contract upgrade. Only admin can propose.
     pub fn propose_upgrade(env: Env, admin: Address, new_wasm_hash: BytesN<32>) {
         Self::require_current_admin(&env, &admin);
-        let execute_at = env.ledger().timestamp() + UPGRADE_TIMELOCK;
+        let config = Self::get_config(&env);
+        let execute_at = env.ledger().timestamp() + config.upgrade_timelock;
         let proposal = UpgradeProposal {
             new_wasm_hash: new_wasm_hash.clone(),
             execute_at,
